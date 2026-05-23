@@ -1,0 +1,13 @@
+# Copy this file to `local.properties` (gitignored) and fill in real values.
+# Android Studio writes `sdk.dir` here automatically the first time you open
+# the project; the TURN_* lines below are bluesteal-specific.
+#
+# To mint TURN credentials, see the root README at
+# https://github.com/<owner>/bluesteal#turn-relay-configuration
+
+sdk.dir=/Users/<you>/Library/Android/sdk
+
+# Cloudflare Realtime TURN — short-lived credentials minted from a TURN Key.
+# Leave blank to fall back to STUN-only (no TURN relay path).
+TURN_USERNAME=
+TURN_CREDENTIAL=

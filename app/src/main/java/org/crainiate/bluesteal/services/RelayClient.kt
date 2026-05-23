@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import org.crainiate.bluesteal.BuildConfig
 import org.crainiate.bluesteal.logging.RelayTracer
 import org.crainiate.bluesteal.models.RelayMessage
 import org.crainiate.bluesteal.models.SignalingMessage
@@ -253,16 +254,33 @@ class RelayClient(
             }
     }
 
+    /**
+     * ICE servers. STUN-only is fine for same-LAN pairings; TURN is the fallback
+     * when ICE can't form a host/srflx pair — cross-AP via a WiFi extender,
+     * cellular ↔ home, NATs without hairpinning, etc.
+     *
+     * Cloudflare Realtime TURN URLs include both UDP and TCP variants plus a
+     * TLS-wrapped `turns:` line. The TLS form is the one that survives the
+     * most hostile networks (corporate guest WiFi, mobile carriers that block
+     * UDP). Credentials come from `BuildConfig`, populated at build time from
+     * `local.properties` — see the root README for the signup flow. Blank
+     * credentials are tolerated; libwebrtc will skip the TURN entries and
+     * fall back to STUN.
+     */
     private fun defaultIceServers(): List<PeerConnection.IceServer> = listOf(
         PeerConnection.IceServer.builder(listOf(
             "stun:stun.l.google.com:19302",
             "stun:stun1.l.google.com:19302",
             "stun:stun.cloudflare.com:3478"
         )).createIceServer(),
-        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-            .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
-        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
-            .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer()
+        PeerConnection.IceServer.builder(listOf(
+            "turn:turn.cloudflare.com:3478?transport=udp",
+            "turn:turn.cloudflare.com:3478?transport=tcp",
+            "turns:turn.cloudflare.com:5349?transport=tcp"
+        ))
+            .setUsername(BuildConfig.TURN_USERNAME)
+            .setPassword(BuildConfig.TURN_CREDENTIAL)
+            .createIceServer()
     )
 
     // ---- Offer / answer ----
