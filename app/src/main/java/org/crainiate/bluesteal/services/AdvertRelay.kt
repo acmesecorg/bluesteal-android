@@ -33,7 +33,7 @@ import java.util.UUID
  *   otherwise the silent side's UDP binding ages out and ICE consent-freshness
  *   tears the session down. See docs §10.
  *
- * Mirrors `bluemonday/bluesteal/Services/AdvertRelay.swift`.
+ * Mirrors `bluesteal-macos/bluesteal/Services/AdvertRelay.swift`.
  */
 class AdvertRelay(
     private val store: AdvertStore,

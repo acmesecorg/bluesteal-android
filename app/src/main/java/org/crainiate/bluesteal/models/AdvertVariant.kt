@@ -3,7 +3,7 @@ package org.crainiate.bluesteal.models
 /**
  * Classification of a single caBLE / FIDO hybrid advertisement service-data entry.
  *
- * Mirrors `bluemonday/bluesteal/Models/AdvertVariant.swift` and Windows
+ * Mirrors `bluesteal-macos/bluesteal/Models/AdvertVariant.swift` and Windows
  * `Bluesteal/Models/AdvertVariant.cs` exactly — `wireName` round-trips between
  * platforms via [RelayMessage.Advert.variant], so any divergence breaks
  * cross-platform pairing.

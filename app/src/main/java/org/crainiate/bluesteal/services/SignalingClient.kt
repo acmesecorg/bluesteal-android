@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicReference
  * ```
  *
  * Knows nothing about WebRTC; just emits [SignalingMessage]s up to whoever
- * owns it. Mirrors `bluemonday/bluesteal/Services/SignalingClient.swift` and
+ * owns it. Mirrors `bluesteal-macos/bluesteal/Services/SignalingClient.swift` and
  * Windows `Bluesteal/Services/SignalingClient.cs` exactly — pairing-code
  * alphabet, code length, FNV-1a starting-broker index, and 6 s per-broker
  * timeout MUST agree across all four platforms or cross-platform pairing

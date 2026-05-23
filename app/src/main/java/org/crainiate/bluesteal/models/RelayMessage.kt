@@ -19,7 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * completes. Codable JSON; one message per channel send.
  *
  * Wire shape (tagged union, must match
- * `bluemonday/bluesteal/Models/RelayMessage.swift` and Windows
+ * `bluesteal-macos/bluesteal/Models/RelayMessage.swift` and Windows
  * `Bluesteal/Models/RelayMessage.cs` exactly):
  *
  * - advert:    `{"type":"advert",    "payload": RelayAdvert}`

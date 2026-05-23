@@ -26,7 +26,7 @@ import java.time.Instant
  * Self-published payloads are tracked so the local scanner doesn't ingest its
  * own emission and forward it back to the peer.
  *
- * Mirrors `bluemonday/bluesteal/Services/RebroadcastService.swift`.
+ * Mirrors `bluesteal-macos/bluesteal/Services/RebroadcastService.swift`.
  *
  * Android-specific note vs macOS: [BluetoothLeAdvertiser] accepts raw
  * service-data and manufacturer-data, so we re-emit every variant faithfully

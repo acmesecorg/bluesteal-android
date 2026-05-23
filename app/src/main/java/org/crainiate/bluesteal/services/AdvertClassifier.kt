@@ -6,7 +6,7 @@ import java.util.UUID
 
 /**
  * Pure classification: given a service-data UUID and its raw bytes, return the
- * caBLE variant. Mirrors `bluemonday/bluesteal/Services/AdvertClassifier.swift`
+ * caBLE variant. Mirrors `bluesteal-macos/bluesteal/Services/AdvertClassifier.swift`
  * exactly — see Chromium `fido_cable_discovery.cc` and `v2_constants.h`
  * (`kAdvertSize = 16 + 4`).
  */

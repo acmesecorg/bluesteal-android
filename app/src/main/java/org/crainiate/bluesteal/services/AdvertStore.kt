@@ -14,7 +14,7 @@ import java.time.Instant
  * Aggregates raw scanner events into a deduped, ordered list of [CableAdvert]
  * and appends every detection to the JSONL log.
  *
- * Mirrors `bluemonday/bluesteal/Services/AdvertStore.swift` and Windows
+ * Mirrors `bluesteal-macos/bluesteal/Services/AdvertStore.swift` and Windows
  * `Bluesteal/Services/AdvertStore.cs`.
  */
 class AdvertStore(private val logger: JsonlLogger) {

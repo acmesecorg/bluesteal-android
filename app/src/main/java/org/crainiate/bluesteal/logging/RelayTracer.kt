@@ -31,7 +31,7 @@ import java.util.concurrent.Executors
  * { ts, pid, instanceId, role, code, category, event, data }
  * ```
  *
- * Mirrors `bluemonday/bluesteal/Logging/RelayTracer.swift` and Windows
+ * Mirrors `bluesteal-macos/bluesteal/Logging/RelayTracer.swift` and Windows
  * `Bluesteal/Services/RelayTracer.cs` so the three traces can be diff'd line
  * for line.
  *

@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * via [SignalingClient]; once the data channel is open we drop off the broker
  * and the channel is the only path used.
  *
- * Mirrors `bluemonday/bluesteal/Services/RelayClient.swift` and Windows
+ * Mirrors `bluesteal-macos/bluesteal/Services/RelayClient.swift` and Windows
  * `Bluesteal/Services/RelayClient.cs` — all five state transitions, the
  * `candidate:` prefix normalisation for SIPSorcery, and the trickle-ICE
  * buffer-until-remote-description ordering.
@@ -453,7 +453,14 @@ class RelayClient(
         override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
             tracer.log("ice", "ice.connectionState", mapOf("state" to newState.name))
             if (newState == PeerConnection.IceConnectionState.FAILED) {
-                setState(State.Closed("ICE failed"))
+                // Full teardown (not just setState) so per-session flags —
+                // `hasRemoteDescription`, the candidate buffers — get cleared.
+                // Without this, the next host()/join() reuses a stale
+                // `hasRemoteDescription=true` and immediately publishes local
+                // ICE candidates *before* the new peer has subscribed, which
+                // breaks re-pairing after an ICE failure. See
+                // docs/MACOS_RELAY_PAIRING_FIXES.md §10.
+                disconnect(reason = "ICE failed")
             }
         }
         override fun onIceConnectionReceivingChange(receiving: Boolean) {}
