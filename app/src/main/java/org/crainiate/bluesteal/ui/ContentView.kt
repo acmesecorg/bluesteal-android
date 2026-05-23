@@ -5,10 +5,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,16 +71,25 @@ private fun AdvertList(app: BluestealApp) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+            Icon(
+                imageVector = Icons.Filled.SettingsInputAntenna,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(64.dp)
+            )
+            Spacer(Modifier.height(12.dp))
             Text(
                 "Waiting for caBLE adverts",
-                style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
             Text(
                 "Listening for service data under UUIDs 0xFFF9 (FIDO) and 0xFDE2 (Google). " +
                 "Start a hybrid sign-in flow on a nearby phone or laptop.",
                 textAlign = TextAlign.Center,
-                style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     } else {
