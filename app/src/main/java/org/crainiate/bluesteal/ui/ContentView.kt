@@ -51,7 +51,8 @@ fun ContentView(app: BluestealApp) {
             RelayView(
                 relay = app.relay,
                 advertRelay = app.advertRelay,
-                rebroadcast = app.rebroadcast
+                rebroadcast = app.rebroadcast,
+                tunnel = app.tunnel
             )
             HorizontalDivider()
             AdvertList(app = app)

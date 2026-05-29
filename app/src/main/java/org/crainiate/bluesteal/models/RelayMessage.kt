@@ -39,6 +39,13 @@ sealed class RelayMessage {
     data class Advert(val payload: RelayAdvert) : RelayMessage()
     data class Heartbeat(val payload: RelayHeartbeat) : RelayMessage()
     data class Bye(val reason: String) : RelayMessage()
+
+    /**
+     * caBLE tunnel make-before-break handoff control messages. Only used by the
+     * tunnel transport; the WebRTC path never emits or receives these.
+     */
+    data class HandoffOffer(val payload: RelayHandoffOffer) : RelayMessage()
+    data class HandoffAck(val payload: RelayHandoffAck) : RelayMessage()
 }
 
 /** Lossy projection of a [CableAdvert] for the wire. */
@@ -74,6 +81,27 @@ data class RelayHeartbeat(
 )
 
 /**
+ * Host announces the next hop's routing_id + minute over the current tunnel.
+ * Promotion still requires an ack — [validFrom] is advisory.
+ */
+@Serializable
+data class RelayHandoffOffer(
+    val nextRoutingId: String,    // 6 hex chars
+    val nextMinute: Long,         // peer derives next tunnel_id from (code, nextMinute)
+    val validFrom: String         // ISO-8601
+)
+
+/**
+ * Peer's reply: [connected] true iff its NKpsk0 on the new hop succeeded.
+ * [nextRoutingId] is the correlation key across overlapping hops.
+ */
+@Serializable
+data class RelayHandoffAck(
+    val nextRoutingId: String,
+    val connected: Boolean
+)
+
+/**
  * Custom serializer for the tagged-union format. Kotlinx-serialization's
  * built-in polymorphism wants a flat discriminator (`{"type":"…", …flat…}`)
  * but the canonical Swift/C# wire format nests payloads — so we hand-roll.
@@ -99,6 +127,14 @@ internal object RelayMessageSerializer : KSerializer<RelayMessage> {
                 put("type", JsonPrimitive("bye"))
                 put("reason", JsonPrimitive(value.reason))
             }
+            is RelayMessage.HandoffOffer -> buildJsonObject {
+                put("type", JsonPrimitive("handoffOffer"))
+                put("payload", json.encodeToJsonElement(RelayHandoffOffer.serializer(), value.payload))
+            }
+            is RelayMessage.HandoffAck -> buildJsonObject {
+                put("type", JsonPrimitive("handoffAck"))
+                put("payload", json.encodeToJsonElement(RelayHandoffAck.serializer(), value.payload))
+            }
         }
         jsonEnc.encodeJsonElement(obj)
     }
@@ -123,6 +159,14 @@ internal object RelayMessageSerializer : KSerializer<RelayMessage> {
                 val reason = obj["reason"]?.jsonPrimitive?.contentOrNull ?: ""
                 RelayMessage.Bye(reason)
             }
+            "handoffOffer" -> {
+                val payload = obj["payload"] ?: error("handoffOffer missing payload")
+                RelayMessage.HandoffOffer(json.decodeFromJsonElement(RelayHandoffOffer.serializer(), payload))
+            }
+            "handoffAck" -> {
+                val payload = obj["payload"] ?: error("handoffAck missing payload")
+                RelayMessage.HandoffAck(json.decodeFromJsonElement(RelayHandoffAck.serializer(), payload))
+            }
             else -> error("Unknown RelayMessage type: $type")
         }
     }
@@ -133,4 +177,6 @@ internal fun RelayMessage.typeName(): String = when (this) {
     is RelayMessage.Advert -> "advert"
     is RelayMessage.Heartbeat -> "heartbeat"
     is RelayMessage.Bye -> "bye"
+    is RelayMessage.HandoffOffer -> "handoffOffer"
+    is RelayMessage.HandoffAck -> "handoffAck"
 }

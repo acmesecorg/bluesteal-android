@@ -10,6 +10,7 @@ import org.crainiate.bluesteal.services.BleAdvertiser
 import org.crainiate.bluesteal.services.CableScanner
 import org.crainiate.bluesteal.services.RebroadcastService
 import org.crainiate.bluesteal.services.RelayClient
+import org.crainiate.bluesteal.services.tunnel.TunnelTransport
 
 /**
  * Application-singleton DI container. The same singletons that live in
@@ -29,6 +30,8 @@ class BluestealApp : Application() {
     lateinit var advertRelay: AdvertRelay
         private set
     lateinit var bleAdvertiser: BleAdvertiser
+        private set
+    lateinit var tunnel: TunnelTransport
         private set
     lateinit var rebroadcast: RebroadcastService
         private set
@@ -59,10 +62,15 @@ class BluestealApp : Application() {
         relay = RelayClient(this, tracer)
         advertRelay = AdvertRelay(store = store, relay = relay)
         bleAdvertiser = BleAdvertiser(this, tracer)
+        // caBLE tunnel transport (parallel to WebRTC). Inbound decrypted frames
+        // are routed into the same advert path as the WebRTC channel.
+        tunnel = TunnelTransport(tracer)
+        tunnel.onFrame = { bytes -> advertRelay.handleTunnelFrame(bytes) }
         rebroadcast = RebroadcastService(
             advertRelay = advertRelay,
             advertiser = bleAdvertiser,
             relay = relay,
+            tunnel = tunnel,
             tracer = tracer
         )
         // Loop-guard: AdvertStore must drop scanner events that match a

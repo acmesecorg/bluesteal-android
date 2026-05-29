@@ -100,6 +100,10 @@ dependencies {
     // WebRTC
     implementation(libs.webrtc.sdk)
 
+    // caBLE tunnel side-channel: WebSocket transport + EC math
+    implementation(libs.okhttp)
+    implementation(libs.bouncycastle.prov)
+
     // Tooling
     debugImplementation(libs.androidx.ui.tooling)
 }

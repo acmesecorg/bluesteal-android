@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import org.crainiate.bluesteal.logging.RelayTracer
 import org.crainiate.bluesteal.models.AdvertVariant
 import org.crainiate.bluesteal.models.CableAdvert
+import org.crainiate.bluesteal.services.tunnel.TunnelTransport
 import java.time.Duration
 import java.time.Instant
 
@@ -36,6 +37,7 @@ class RebroadcastService(
     private val advertRelay: AdvertRelay,
     private val advertiser: BleAdvertiser,
     private val relay: RelayClient,
+    private val tunnel: TunnelTransport,
     private val tracer: RelayTracer
 ) {
     private val _activeCount = MutableStateFlow(0)
@@ -62,11 +64,19 @@ class RebroadcastService(
             _isActive.value = active
             _lastError.value = error
         }
-        relay.addStateListener { newState ->
-            if (newState is RelayClient.State.Open) startSweep()
-            else stopSweep()
-        }
-        if (relay.state.value is RelayClient.State.Open) startSweep()
+        // The sweep runs while EITHER transport is open. Only one is active at
+        // a time: WebRTC leaves `tunnel` idle, the caBLE tunnel leaves `relay`
+        // idle. Both fan in here so peer adverts are re-broadcast in both modes.
+        relay.addStateListener { handleStateChange() }
+        tunnel.addStateListener { handleStateChange() }
+        if (anyTransportOpen()) startSweep()
+    }
+
+    private fun anyTransportOpen(): Boolean =
+        relay.state.value is RelayClient.State.Open || tunnel.state.value is RelayClient.State.Open
+
+    private fun handleStateChange() {
+        if (anyTransportOpen()) startSweep() else stopSweep()
     }
 
     /**

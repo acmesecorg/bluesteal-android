@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import org.crainiate.bluesteal.models.AdvertVariant
 import org.crainiate.bluesteal.models.CableAdvert
 import org.crainiate.bluesteal.models.RelayAdvert
@@ -52,6 +53,15 @@ class AdvertRelay(
     var onLocalIngest: ((CableAdvert) -> Unit)? = null
     var onReceived: ((CableAdvert) -> Unit)? = null
 
+    /**
+     * When set (tunnel mode), outbound adverts are serialised to JSON and sent
+     * through this closure instead of the WebRTC data channel. Mirrors macOS
+     * `AdvertRelay.tunnelSend` / Windows `AdvertRelay.TunnelSend`.
+     */
+    var tunnelSend: ((ByteArray) -> Unit)? = null
+
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var heartbeatJob: Job? = null
 
@@ -60,9 +70,19 @@ class AdvertRelay(
     }
 
     private fun wireUp() {
-        // Outbound.
+        // Outbound — through the tunnel transport when active, otherwise the
+        // WebRTC data channel.
         store.onIngest = { advert ->
-            relay.send(RelayMessage.Advert(advert.toWire()))
+            val msg = RelayMessage.Advert(advert.toWire())
+            val tunnel = tunnelSend
+            if (tunnel != null) {
+                val bytes = runCatching {
+                    json.encodeToString(RelayMessage.serializer(), msg).toByteArray(Charsets.UTF_8)
+                }.getOrNull()
+                if (bytes != null) tunnel(bytes)
+            } else {
+                relay.send(msg)
+            }
             onLocalIngest?.invoke(advert)
         }
         // Inbound.
@@ -93,6 +113,19 @@ class AdvertRelay(
         heartbeatJob = null
     }
 
+    /**
+     * Decodes a raw JSON frame delivered by the tunnel transport and routes it
+     * through the same inbound path as the WebRTC channel — so the received
+     * list and re-broadcast keep working unchanged. Mirrors macOS
+     * `AdvertRelay.handleTunnelFrame`.
+     */
+    fun handleTunnelFrame(data: ByteArray) {
+        val message = runCatching {
+            json.decodeFromString(RelayMessage.serializer(), String(data, Charsets.UTF_8))
+        }.getOrNull() ?: return
+        handleInbound(message)
+    }
+
     private fun handleInbound(message: RelayMessage) {
         when (message) {
             is RelayMessage.Advert -> {
@@ -116,6 +149,10 @@ class AdvertRelay(
             }
             is RelayMessage.Bye -> {
                 // RelayClient tears down on bye; nothing to do here.
+            }
+            is RelayMessage.HandoffOffer, is RelayMessage.HandoffAck -> {
+                // Tunnel-transport control frames; handled inside TunnelTransport,
+                // never surfaced on the WebRTC onMessage path.
             }
         }
     }
