@@ -44,6 +44,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val app = application as BluestealApp
 
+        handleAutoDrive(app)
+
         setContent {
             var granted by remember { mutableStateOf(hasAllPermissions()) }
             val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -82,5 +84,24 @@ class MainActivity : ComponentActivity() {
 
     private fun hasAllPermissions(): Boolean = requiredPermissions.all {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * Auto-drives Host/Join from launch-intent extras so the flow can be driven
+     * over adb without tapping the UI, e.g.:
+     *   adb shell am start -n org.crainiate.bluesteal/.ui.MainActivity --ez host true
+     *   adb shell am start -n org.crainiate.bluesteal/.ui.MainActivity --es join ABCDE-123456
+     */
+    private fun handleAutoDrive(app: BluestealApp) {
+        when {
+            intent?.getBooleanExtra("host", false) == true -> {
+                app.tracer.log("app", "app.autohost")
+                app.beginHost()
+            }
+            else -> intent?.getStringExtra("join")?.let { token ->
+                app.tracer.log("app", "app.autojoin", mapOf("token" to token))
+                app.beginJoin(token)
+            }
+        }
     }
 }

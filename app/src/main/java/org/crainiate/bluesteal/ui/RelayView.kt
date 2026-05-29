@@ -16,7 +16,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -39,33 +38,24 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import org.crainiate.bluesteal.services.AdvertRelay
+import org.crainiate.bluesteal.services.PairingCode
 import org.crainiate.bluesteal.services.RebroadcastService
-import org.crainiate.bluesteal.services.RelayClient
-import org.crainiate.bluesteal.services.SignalingClient
+import org.crainiate.bluesteal.services.RelayState
 import org.crainiate.bluesteal.services.tunnel.TunnelKeyDerivation
 import org.crainiate.bluesteal.services.tunnel.TunnelTransport
 
 /**
- * Relay control bar. Two transports share this bar: the WebRTC `RelayClient`
- * and the caBLE `TunnelTransport`. The tunnel "owns" the UI whenever it is past
- * idle/closed; otherwise WebRTC drives it. On the host side a picker chooses the
- * transport; on the join side the input shape (5-char code vs 11-char token)
- * routes automatically — mirrors macOS/iOS `RelayView`.
+ * Relay control bar. The caBLE [TunnelTransport] is the only transport: the
+ * host generates an OOB token (code-routing) the peer pastes; the join input
+ * accepts that token. Mirrors macOS/iOS `RelayView`.
  */
-enum class TransportKind(val label: String) { WebRTC("WebRTC"), Tunnel("Tunnel") }
-
 @Composable
 fun RelayView(
-    relay: RelayClient,
     advertRelay: AdvertRelay,
     rebroadcast: RebroadcastService,
     tunnel: TunnelTransport
 ) {
-    val relayState by relay.state.collectAsState()
-    val tunnelState by tunnel.state.collectAsState()
-
-    val tunnelActive = tunnelState !is RelayClient.State.Idle && tunnelState !is RelayClient.State.Closed
-    val effectiveState = if (tunnelActive) tunnelState else relayState
+    val state by tunnel.state.collectAsState()
 
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
         Column(
@@ -75,34 +65,30 @@ fun RelayView(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusBadge(state = effectiveState, tunnelActive = tunnelActive)
+                StatusBadge(state = state)
             }
 
-            when (effectiveState) {
-                is RelayClient.State.Idle, is RelayClient.State.Closed ->
-                    IdleControls(relay = relay, advertRelay = advertRelay, tunnel = tunnel)
+            when (state) {
+                is RelayState.Idle, is RelayState.Closed ->
+                    IdleControls(advertRelay = advertRelay, tunnel = tunnel)
 
-                is RelayClient.State.Hosting ->
+                is RelayState.Hosting ->
                     HostingControls(
-                        code = (effectiveState as RelayClient.State.Hosting).code,
-                        tunnelActive = tunnelActive,
                         token = tunnel.token.collectAsState().value,
-                        onCancel = { cancelOrDisconnect(tunnelActive, relay, advertRelay, tunnel, "cancelled") }
+                        onCancel = { cancelOrDisconnect(advertRelay, tunnel) }
                     )
 
-                is RelayClient.State.Joining, is RelayClient.State.Negotiating ->
+                is RelayState.Joining, is RelayState.Negotiating ->
                     NegotiatingControls(
-                        label = stateLabel(effectiveState, tunnelActive),
-                        onCancel = { cancelOrDisconnect(tunnelActive, relay, advertRelay, tunnel, "cancelled") }
+                        label = stateLabel(state),
+                        onCancel = { cancelOrDisconnect(advertRelay, tunnel) }
                     )
 
-                is RelayClient.State.Open ->
+                is RelayState.Open ->
                     OpenControls(
-                        relay = relay,
                         tunnel = tunnel,
                         rebroadcast = rebroadcast,
-                        tunnelActive = tunnelActive,
-                        onDisconnect = { cancelOrDisconnect(tunnelActive, relay, advertRelay, tunnel, "user") }
+                        onDisconnect = { cancelOrDisconnect(advertRelay, tunnel) }
                     )
             }
         }
@@ -110,13 +96,13 @@ fun RelayView(
 }
 
 @Composable
-private fun StatusBadge(state: RelayClient.State, tunnelActive: Boolean) {
+private fun StatusBadge(state: RelayState) {
     val color = when (state) {
-        is RelayClient.State.Idle, is RelayClient.State.Closed -> Color.Gray
-        is RelayClient.State.Hosting,
-        is RelayClient.State.Joining,
-        is RelayClient.State.Negotiating -> Color(0xFFFF9800)
-        is RelayClient.State.Open -> Color(0xFF4CAF50)
+        is RelayState.Idle, is RelayState.Closed -> Color.Gray
+        is RelayState.Hosting,
+        is RelayState.Joining,
+        is RelayState.Negotiating -> Color(0xFFFF9800)
+        is RelayState.Open -> Color(0xFF4CAF50)
     }
     Row(verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -126,27 +112,23 @@ private fun StatusBadge(state: RelayClient.State, tunnelActive: Boolean) {
                 .clip(CircleShape)
                 .background(color)
         )
-        Text("Relay · " + stateLabel(state, tunnelActive), style = MaterialTheme.typography.bodyMedium)
+        Text("Relay · " + stateLabel(state), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
-private fun stateLabel(state: RelayClient.State, tunnelActive: Boolean): String {
-    val prefix = if (tunnelActive) "tunnel " else ""
-    return when (state) {
-        is RelayClient.State.Idle -> "idle"
-        is RelayClient.State.Hosting -> "${prefix}hosting"
-        is RelayClient.State.Joining -> "${prefix}joining ${state.code}"
-        is RelayClient.State.Negotiating -> "${prefix}negotiating"
-        is RelayClient.State.Open -> "${prefix}open"
-        is RelayClient.State.Closed -> "closed (${state.reason})"
-    }
+private fun stateLabel(state: RelayState): String = when (state) {
+    is RelayState.Idle -> "idle"
+    is RelayState.Hosting -> "tunnel hosting"
+    is RelayState.Joining -> "tunnel joining ${state.code}"
+    is RelayState.Negotiating -> "tunnel negotiating"
+    is RelayState.Open -> "tunnel open"
+    is RelayState.Closed -> "closed (${state.reason})"
 }
 
 // ---- Idle / Hosting / Negotiating / Open ----
 
 @Composable
-private fun IdleControls(relay: RelayClient, advertRelay: AdvertRelay, tunnel: TunnelTransport) {
-    var transport by remember { mutableStateOf(TransportKind.Tunnel) }
+private fun IdleControls(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
     var showJoinField by remember { mutableStateOf(false) }
     var joinInput by remember { mutableStateOf("") }
 
@@ -157,7 +139,7 @@ private fun IdleControls(relay: RelayClient, advertRelay: AdvertRelay, tunnel: T
                 onValueChange = { joinInput = it.uppercase().trim() },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("code or token") },
+                label = { Text("token (e.g. ABCDE-123456)") },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters)
             )
             Row(
@@ -171,7 +153,7 @@ private fun IdleControls(relay: RelayClient, advertRelay: AdvertRelay, tunnel: T
                 }) { Text("Cancel") }
                 Button(
                     onClick = {
-                        submitJoin(joinInput, relay, advertRelay, tunnel)
+                        submitJoin(joinInput, advertRelay, tunnel)
                         showJoinField = false
                         joinInput = ""
                     },
@@ -184,18 +166,8 @@ private fun IdleControls(relay: RelayClient, advertRelay: AdvertRelay, tunnel: T
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FilterChip(
-                selected = transport == TransportKind.WebRTC,
-                onClick = { transport = TransportKind.WebRTC },
-                label = { Text(TransportKind.WebRTC.label, style = MaterialTheme.typography.labelMedium) }
-            )
-            FilterChip(
-                selected = transport == TransportKind.Tunnel,
-                onClick = { transport = TransportKind.Tunnel },
-                label = { Text(TransportKind.Tunnel.label, style = MaterialTheme.typography.labelMedium) }
-            )
             Spacer(modifier = Modifier.weight(1f))
-            Button(onClick = { startHost(transport, relay, advertRelay, tunnel) }) { Text("Host") }
+            Button(onClick = { startTunnelHost(advertRelay, tunnel) }) { Text("Host") }
             OutlinedButton(onClick = { showJoinField = true }) { Text("Join…") }
         }
     }
@@ -203,22 +175,19 @@ private fun IdleControls(relay: RelayClient, advertRelay: AdvertRelay, tunnel: T
 
 @Composable
 private fun HostingControls(
-    code: String,
-    tunnelActive: Boolean,
     token: String?,
     onCancel: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
-    val label = if (tunnelActive) "Token" else "Code"
-    val ready = !tunnelActive || token != null
-    val displayValue = if (tunnelActive) (token ?: "waiting…") else code
+    val ready = token != null
+    val displayValue = token ?: "waiting…"
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            label,
+            "Token",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
         )
@@ -261,10 +230,8 @@ private fun NegotiatingControls(label: String, onCancel: () -> Unit) {
 
 @Composable
 private fun OpenControls(
-    relay: RelayClient,
     tunnel: TunnelTransport,
     rebroadcast: RebroadcastService,
-    tunnelActive: Boolean,
     onDisconnect: () -> Unit
 ) {
     val rebroadcasting by rebroadcast.isActive.collectAsState()
@@ -276,42 +243,22 @@ private fun OpenControls(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (tunnelActive) {
-                val sent by tunnel.messagesSent.collectAsState()
-                val received by tunnel.messagesReceived.collectAsState()
-                val hbt by tunnel.heartbeatCount.collectAsState()
-                val hop by tunnel.hopNumber.collectAsState()
-                Text("sent $sent", style = MaterialTheme.typography.bodySmall)
-                Text("recv $received", style = MaterialTheme.typography.bodySmall)
-                Text("hbt $hbt", style = MaterialTheme.typography.bodySmall)
-                if (hop > 0) {
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("hop $hop", style = MaterialTheme.typography.labelSmall) },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = Color(0x332196F3),
-                            labelColor = Color(0xFF2196F3)
-                        )
+            val sent by tunnel.messagesSent.collectAsState()
+            val received by tunnel.messagesReceived.collectAsState()
+            val hbt by tunnel.heartbeatCount.collectAsState()
+            val hop by tunnel.hopNumber.collectAsState()
+            Text("sent $sent", style = MaterialTheme.typography.bodySmall)
+            Text("recv $received", style = MaterialTheme.typography.bodySmall)
+            Text("hbt $hbt", style = MaterialTheme.typography.bodySmall)
+            if (hop > 0) {
+                AssistChip(
+                    onClick = {},
+                    label = { Text("hop $hop", style = MaterialTheme.typography.labelSmall) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = Color(0x332196F3),
+                        labelColor = Color(0xFF2196F3)
                     )
-                }
-            } else {
-                val sent by relay.messagesSent.collectAsState()
-                val received by relay.messagesReceived.collectAsState()
-                val hbt by relay.heartbeatCount.collectAsState()
-                val turn by relay.isUsingTurn.collectAsState()
-                Text("sent $sent", style = MaterialTheme.typography.bodySmall)
-                Text("recv $received", style = MaterialTheme.typography.bodySmall)
-                Text("hbt $hbt", style = MaterialTheme.typography.bodySmall)
-                if (turn) {
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("TURN", style = MaterialTheme.typography.labelSmall) },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = Color(0x33FF9800),
-                            labelColor = Color(0xFFFF9800)
-                        )
-                    )
-                }
+                )
             }
             Spacer(modifier = Modifier.weight(1f))
             OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
@@ -355,73 +302,22 @@ private fun wireTunnelSend(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
     advertRelay.tunnelSend = { bytes -> tunnel.send(bytes) }
 }
 
-private fun startHost(
-    transport: TransportKind,
-    relay: RelayClient,
-    advertRelay: AdvertRelay,
-    tunnel: TunnelTransport
-) {
-    when (transport) {
-        TransportKind.WebRTC -> relay.host()
-        TransportKind.Tunnel -> {
-            val code = SignalingClient.makeCode()
-            wireTunnelSend(advertRelay, tunnel)
-            tunnel.host(code)
-        }
-    }
+private fun startTunnelHost(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
+    wireTunnelSend(advertRelay, tunnel)
+    tunnel.host(PairingCode.make())
 }
 
-private fun submitJoin(
-    rawInput: String,
-    relay: RelayClient,
-    advertRelay: AdvertRelay,
-    tunnel: TunnelTransport
-) {
+private fun submitJoin(rawInput: String, advertRelay: AdvertRelay, tunnel: TunnelTransport) {
     val raw = rawInput.trim()
-    if (TunnelKeyDerivation.isTunnelToken(raw)) {
-        wireTunnelSend(advertRelay, tunnel)
-        tunnel.join(raw.uppercase())
-    } else {
-        val code = normaliseCode(raw)
-        if (code.length == SignalingClient.codeLength) relay.join(code)
-    }
+    if (!TunnelKeyDerivation.isTunnelToken(raw)) return
+    wireTunnelSend(advertRelay, tunnel)
+    tunnel.join(raw.uppercase())
 }
 
-private fun cancelOrDisconnect(
-    tunnelActive: Boolean,
-    relay: RelayClient,
-    advertRelay: AdvertRelay,
-    tunnel: TunnelTransport,
-    reason: String
-) {
-    if (tunnelActive) {
-        advertRelay.tunnelSend = null
-        tunnel.disconnect()
-    } else {
-        relay.disconnect(reason)
-    }
+private fun cancelOrDisconnect(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
+    advertRelay.tunnelSend = null
+    tunnel.disconnect()
 }
 
 private fun joinInputValid(input: String): Boolean =
-    TunnelKeyDerivation.isTunnelToken(input) ||
-        normaliseCode(input).length == SignalingClient.codeLength
-
-/**
- * Force the typed code into the pairing alphabet `ABCDEFGHJKMNPQRSTUVWXYZ`.
- * Strips spaces, ambiguous I/L/O, digits, and anything else the IME emits.
- */
-private fun normaliseCode(raw: String): String {
-    val allowed = SignalingClient.codeAlphabet.toCharSet()
-    val sb = StringBuilder()
-    for (c in raw.uppercase()) {
-        if (sb.length >= SignalingClient.codeLength) break
-        if (allowed.contains(c)) sb.append(c)
-    }
-    return sb.toString()
-}
-
-private fun CharArray.toCharSet(): HashSet<Char> {
-    val s = HashSet<Char>(size)
-    for (c in this) s.add(c)
-    return s
-}
+    TunnelKeyDerivation.isTunnelToken(input.trim())

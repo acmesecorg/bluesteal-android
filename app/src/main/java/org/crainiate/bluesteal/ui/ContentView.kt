@@ -49,7 +49,6 @@ fun ContentView(app: BluestealApp) {
             ScannerStatusView(scanner = app.scanner, store = app.store)
             HorizontalDivider()
             RelayView(
-                relay = app.relay,
                 advertRelay = app.advertRelay,
                 rebroadcast = app.rebroadcast,
                 tunnel = app.tunnel

@@ -1,44 +1,33 @@
 package org.crainiate.bluesteal.services
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import org.crainiate.bluesteal.logging.RelayTracer
 import org.crainiate.bluesteal.models.AdvertVariant
 import org.crainiate.bluesteal.models.CableAdvert
 import org.crainiate.bluesteal.models.RelayAdvert
-import org.crainiate.bluesteal.models.RelayHeartbeat
 import org.crainiate.bluesteal.models.RelayMessage
 import org.crainiate.bluesteal.models.hexToBytes
-import org.crainiate.bluesteal.models.toHexLower
 import java.time.Instant
 import java.util.UUID
 
 /**
- * Bridges the local [AdvertStore] with a paired [RelayClient].
+ * Bridges the local [AdvertStore] with the paired peer over the caBLE tunnel.
  *
- * - **Outbound:** every locally ingested advert (`store.onIngest`) is forwarded
- *   to the peer.
- * - **Inbound:** adverts received from the peer are mirrored into a separate
- *   receive-side list so the UI can render them in a "From peer" section
- *   without touching the local list.
- * - **Heartbeats:** when the relay enters `.Open` we start a 4 s bidirectional
- *   heartbeat coroutine — both directions must keep the NAT mapping fresh,
- *   otherwise the silent side's UDP binding ages out and ICE consent-freshness
- *   tears the session down. See docs §10.
+ * - **Outbound:** every locally ingested advert (`store.onIngest`) is serialised
+ *   and forwarded to the peer through [tunnelSend].
+ * - **Inbound:** frames arriving from the tunnel ([handleTunnelFrame]) are
+ *   deserialised and mirrored into a separate receive-side list so the UI can
+ *   render them in a "From peer" section without touching the local list.
  *
- * Mirrors `bluesteal-macos/bluesteal/Services/AdvertRelay.swift`.
+ * The tunnel runs its own heartbeat keep-alive, so there is no heartbeat loop
+ * here. Mirrors `bluesteal-macos/bluesteal/Services/AdvertRelay.swift`.
  */
 class AdvertRelay(
     private val store: AdvertStore,
-    private val relay: RelayClient
+    private val tracer: RelayTracer? = null
 ) {
     private val _received = MutableStateFlow<List<CableAdvert>>(emptyList())
     /** Adverts received from the paired peer, newest-first. */
@@ -54,70 +43,37 @@ class AdvertRelay(
     var onReceived: ((CableAdvert) -> Unit)? = null
 
     /**
-     * When set (tunnel mode), outbound adverts are serialised to JSON and sent
-     * through this closure instead of the WebRTC data channel. Mirrors macOS
-     * `AdvertRelay.tunnelSend` / Windows `AdvertRelay.TunnelSend`.
+     * Outbound adverts are serialised to JSON and sent through this closure
+     * (the caBLE tunnel transport). Set by the view / app once the tunnel is
+     * connected; null means not connected, so adverts are not forwarded.
+     * Mirrors macOS `AdvertRelay.tunnelSend` / Windows `AdvertRelay.TunnelSend`.
      */
     var tunnelSend: ((ByteArray) -> Unit)? = null
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var heartbeatJob: Job? = null
 
     init {
         wireUp()
     }
 
     private fun wireUp() {
-        // Outbound — through the tunnel transport when active, otherwise the
-        // WebRTC data channel.
+        // Outbound — forward to the peer over the tunnel when connected.
         store.onIngest = { advert ->
-            val msg = RelayMessage.Advert(advert.toWire())
-            val tunnel = tunnelSend
-            if (tunnel != null) {
+            tunnelSend?.let { send ->
+                val msg = RelayMessage.Advert(advert.toWire())
                 val bytes = runCatching {
                     json.encodeToString(RelayMessage.serializer(), msg).toByteArray(Charsets.UTF_8)
                 }.getOrNull()
-                if (bytes != null) tunnel(bytes)
-            } else {
-                relay.send(msg)
+                if (bytes != null) send(bytes)
             }
             onLocalIngest?.invoke(advert)
         }
-        // Inbound.
-        relay.onMessage = { message -> handleInbound(message) }
-        // Heartbeats — start on .Open, stop on anything else.
-        relay.addStateListener { newState ->
-            if (newState is RelayClient.State.Open) startHeartbeats()
-            else stopHeartbeats()
-        }
-    }
-
-    fun startHeartbeats() {
-        heartbeatJob?.cancel()
-        heartbeatJob = scope.launch {
-            while (isActive) {
-                delay(4_000)
-                if (relay.state.value !is RelayClient.State.Open) break
-                val ids = store.adverts.value.map { it.id }
-                relay.send(RelayMessage.Heartbeat(
-                    RelayHeartbeat(ts = Instant.now().toString(), knownIds = ids)
-                ))
-            }
-        }
-    }
-
-    fun stopHeartbeats() {
-        heartbeatJob?.cancel()
-        heartbeatJob = null
     }
 
     /**
      * Decodes a raw JSON frame delivered by the tunnel transport and routes it
-     * through the same inbound path as the WebRTC channel — so the received
-     * list and re-broadcast keep working unchanged. Mirrors macOS
-     * `AdvertRelay.handleTunnelFrame`.
+     * through the inbound path — so the received list and re-broadcast keep
+     * working unchanged. Mirrors macOS `AdvertRelay.handleTunnelFrame`.
      */
     fun handleTunnelFrame(data: ByteArray) {
         val message = runCatching {
@@ -130,6 +86,12 @@ class AdvertRelay(
         when (message) {
             is RelayMessage.Advert -> {
                 val advert = message.payload.toCableAdvert() ?: return
+                tracer?.log("relay", "relay.advert.recv", mapOf(
+                    "id" to advert.id,
+                    "variant" to advert.variant.wireName,
+                    "payloadHexPrefix" to advert.payloadHex.take(16),
+                    "rssi" to advert.rssi
+                ))
                 synchronized(lock) {
                     val list = _received.value.toMutableList()
                     val existing = receivedIndex[advert.id]
@@ -148,11 +110,11 @@ class AdvertRelay(
                     .getOrNull() ?: Instant.now()
             }
             is RelayMessage.Bye -> {
-                // RelayClient tears down on bye; nothing to do here.
+                // The tunnel transport tears itself down on bye; nothing to do here.
             }
             is RelayMessage.HandoffOffer, is RelayMessage.HandoffAck -> {
                 // Tunnel-transport control frames; handled inside TunnelTransport,
-                // never surfaced on the WebRTC onMessage path.
+                // never surfaced on this inbound path.
             }
         }
     }

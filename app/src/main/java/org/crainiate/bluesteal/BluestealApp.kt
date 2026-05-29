@@ -8,8 +8,8 @@ import org.crainiate.bluesteal.services.AdvertRelay
 import org.crainiate.bluesteal.services.AdvertStore
 import org.crainiate.bluesteal.services.BleAdvertiser
 import org.crainiate.bluesteal.services.CableScanner
+import org.crainiate.bluesteal.services.PairingCode
 import org.crainiate.bluesteal.services.RebroadcastService
-import org.crainiate.bluesteal.services.RelayClient
 import org.crainiate.bluesteal.services.tunnel.TunnelTransport
 
 /**
@@ -25,8 +25,6 @@ class BluestealApp : Application() {
         private set
     lateinit var store: AdvertStore
         private set
-    lateinit var relay: RelayClient
-        private set
     lateinit var advertRelay: AdvertRelay
         private set
     lateinit var bleAdvertiser: BleAdvertiser
@@ -40,11 +38,10 @@ class BluestealApp : Application() {
         super.onCreate()
 
         // Bias the JVM resolver toward IPv4 *before* anything else touches
-        // networking. On the Pixel 5 we observed Netty (HiveMQ's transport)
-        // taking the AAAA record first on networks that route IPv4 fine but
-        // silently black-hole IPv6 to these public brokers — every connect
-        // attempt would time out at the 6 s budget. These properties must be
-        // set before InetAddress / Netty's DnsNameResolver caches anything.
+        // networking. On the Pixel 5 we observed connects taking the AAAA
+        // record first on networks that route IPv4 fine but silently
+        // black-hole IPv6 — every attempt would time out. These must be set
+        // before InetAddress caches anything.
         System.setProperty("java.net.preferIPv6Addresses", "false")
         System.setProperty("java.net.preferIPv4Stack", "true")
 
@@ -59,17 +56,15 @@ class BluestealApp : Application() {
 
         scanner = CableScanner(this)
         store = AdvertStore(JsonlLogger(this))
-        relay = RelayClient(this, tracer)
-        advertRelay = AdvertRelay(store = store, relay = relay)
+        advertRelay = AdvertRelay(store = store, tracer = tracer)
         bleAdvertiser = BleAdvertiser(this, tracer)
-        // caBLE tunnel transport (parallel to WebRTC). Inbound decrypted frames
-        // are routed into the same advert path as the WebRTC channel.
+        // caBLE tunnel transport — the only transport. Inbound decrypted frames
+        // are routed into the advert path.
         tunnel = TunnelTransport(tracer)
         tunnel.onFrame = { bytes -> advertRelay.handleTunnelFrame(bytes) }
         rebroadcast = RebroadcastService(
             advertRelay = advertRelay,
             advertiser = bleAdvertiser,
-            relay = relay,
             tunnel = tunnel,
             tracer = tracer
         )
@@ -82,5 +77,17 @@ class BluestealApp : Application() {
         // Wire the scanner output into the store. The scanner runs on a BLE
         // worker thread; AdvertStore is thread-safe.
         scanner.onEvent = { event -> store.ingest(event) }
+    }
+
+    /** Wire outbound adverts through the tunnel and start hosting. */
+    fun beginHost() {
+        advertRelay.tunnelSend = { bytes -> tunnel.send(bytes) }
+        tunnel.host(PairingCode.make())
+    }
+
+    /** Wire outbound adverts through the tunnel and join the given OOB token. */
+    fun beginJoin(token: String) {
+        advertRelay.tunnelSend = { bytes -> tunnel.send(bytes) }
+        tunnel.join(token.trim().uppercase())
     }
 }

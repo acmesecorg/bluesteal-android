@@ -36,7 +36,6 @@ import java.time.Instant
 class RebroadcastService(
     private val advertRelay: AdvertRelay,
     private val advertiser: BleAdvertiser,
-    private val relay: RelayClient,
     private val tunnel: TunnelTransport,
     private val tracer: RelayTracer
 ) {
@@ -64,19 +63,16 @@ class RebroadcastService(
             _isActive.value = active
             _lastError.value = error
         }
-        // The sweep runs while EITHER transport is open. Only one is active at
-        // a time: WebRTC leaves `tunnel` idle, the caBLE tunnel leaves `relay`
-        // idle. Both fan in here so peer adverts are re-broadcast in both modes.
-        relay.addStateListener { handleStateChange() }
+        // The sweep runs while the caBLE tunnel is open — that gates peer
+        // advert re-broadcasting.
         tunnel.addStateListener { handleStateChange() }
-        if (anyTransportOpen()) startSweep()
+        if (tunnelOpen()) startSweep()
     }
 
-    private fun anyTransportOpen(): Boolean =
-        relay.state.value is RelayClient.State.Open || tunnel.state.value is RelayClient.State.Open
+    private fun tunnelOpen(): Boolean = tunnel.state.value is RelayState.Open
 
     private fun handleStateChange() {
-        if (anyTransportOpen()) startSweep() else stopSweep()
+        if (tunnelOpen()) startSweep() else stopSweep()
     }
 
     /**
@@ -108,7 +104,7 @@ class RebroadcastService(
     private fun stopSweep() {
         sweepJob?.cancel()
         sweepJob = null
-        stopPublisher("relay closed")
+        stopPublisher("tunnel closed")
         _activeCount.value = 0
         tracer.log("rebroadcast", "rebroadcast.sweep.stop")
     }

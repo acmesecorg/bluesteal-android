@@ -18,7 +18,8 @@ import org.crainiate.bluesteal.models.RelayHandoffAck
 import org.crainiate.bluesteal.models.RelayHandoffOffer
 import org.crainiate.bluesteal.models.RelayHeartbeat
 import org.crainiate.bluesteal.models.RelayMessage
-import org.crainiate.bluesteal.services.RelayClient
+import org.crainiate.bluesteal.services.RelayRole
+import org.crainiate.bluesteal.services.RelayState
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
@@ -52,8 +53,8 @@ class TunnelTransport(private val tracer: RelayTracer) {
 
     // ---- Observable surface (RelayView collects these) ----
 
-    private val _state = MutableStateFlow<RelayClient.State>(RelayClient.State.Idle)
-    val state: StateFlow<RelayClient.State> = _state.asStateFlow()
+    private val _state = MutableStateFlow<RelayState>(RelayState.Idle)
+    val state: StateFlow<RelayState> = _state.asStateFlow()
 
     private val _token = MutableStateFlow<String?>(null)
     val token: StateFlow<String?> = _token.asStateFlow()
@@ -73,8 +74,8 @@ class TunnelTransport(private val tracer: RelayTracer) {
     /** Decrypted advert/unknown frames (raw JSON bytes) for AdvertRelay. */
     var onFrame: ((ByteArray) -> Unit)? = null
 
-    private val stateListeners = CopyOnWriteArrayList<(RelayClient.State) -> Unit>()
-    fun addStateListener(listener: (RelayClient.State) -> Unit) = stateListeners.add(listener)
+    private val stateListeners = CopyOnWriteArrayList<(RelayState) -> Unit>()
+    fun addStateListener(listener: (RelayState) -> Unit) = stateListeners.add(listener)
 
     // ---- Confinement ----
 
@@ -87,7 +88,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
 
     // ---- Session state (touched only on `scope`) ----
 
-    private var role: RelayClient.Role = RelayClient.Role.Host
+    private var role: RelayRole = RelayRole.Host
     private var code = ""
     private var keys: TunnelKeys? = null
     private var host = "cable.ua5v.com"
@@ -132,7 +133,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
         scope.launch {
             val s = _state.value
             val hop = currentHop
-            if (s is RelayClient.State.Open && hop != null) {
+            if (s is RelayState.Open && hop != null) {
                 try {
                     sendControl(hop, RelayMessage.Bye("user_disconnect"))
                     tracer.log("tunnel", "bye.sent", mapOf("reason" to "user_disconnect"))
@@ -144,12 +145,12 @@ class TunnelTransport(private val tracer: RelayTracer) {
 
     private suspend fun hostInternal(code: String) {
         this.code = code
-        role = RelayClient.Role.Host
+        role = RelayRole.Host
         val keys = TunnelKeyDerivation.derive(code)
         this.keys = keys
         host = TunnelServerDomain.get(keys.tunnelServerId) ?: "cable.ua5v.com"
         tracer.setContext("Host", code)
-        setState(RelayClient.State.Hosting(code))
+        setState(RelayState.Hosting(code))
 
         val minute = TunnelKeyDerivation.currentUtcMinute()
         val tunnelId = TunnelKeyDerivation.deriveTunnelId(code, minute)
@@ -168,7 +169,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
 
             val hop = Hop(session, socket.routingId)
             currentHop = hop
-            setState(RelayClient.State.Open(RelayClient.Role.Host))
+            setState(RelayState.Open(RelayRole.Host))
             startReadLoop(hop)
             startHeartbeat()
             startHandoffTimer()
@@ -176,24 +177,24 @@ class TunnelTransport(private val tracer: RelayTracer) {
             throw e
         } catch (e: Exception) {
             tracer.log("tunnel", "host.failed", mapOf("error" to e.toString()))
-            if (!isClosed()) setState(RelayClient.State.Closed("host: ${e.message}"))
+            if (!isClosed()) setState(RelayState.Closed("host: ${e.message}"))
         }
     }
 
     private suspend fun joinInternal(token: String) {
         val parsed = TunnelKeyDerivation.parseToken(token)
         if (parsed == null) {
-            setState(RelayClient.State.Closed("join: bad token"))
+            setState(RelayState.Closed("join: bad token"))
             return
         }
         val (code, routingId) = parsed
         this.code = code
-        role = RelayClient.Role.Peer
+        role = RelayRole.Peer
         val keys = TunnelKeyDerivation.derive(code)
         this.keys = keys
         host = TunnelServerDomain.get(keys.tunnelServerId) ?: "cable.ua5v.com"
         tracer.setContext("Peer", code)
-        setState(RelayClient.State.Joining(code))
+        setState(RelayState.Joining(code))
 
         val minute = TunnelKeyDerivation.currentUtcMinute()
         val candidates = (-2..2).map { TunnelKeyDerivation.deriveTunnelId(code, minute + it) }
@@ -201,12 +202,12 @@ class TunnelTransport(private val tracer: RelayTracer) {
 
         try {
             val socket = TunnelPeerSocket.connectRace(host, routingId, candidates, tracer)
-            setState(RelayClient.State.Negotiating)
+            setState(RelayState.Negotiating)
             val session = TunnelNoiseSession.handshakeAsPeer(socket, keys, tracer)
 
             val hop = Hop(session, routingId)
             currentHop = hop
-            setState(RelayClient.State.Open(RelayClient.Role.Peer))
+            setState(RelayState.Open(RelayRole.Peer))
             startReadLoop(hop)
             startHeartbeat()
             // Peer does not initiate handoffs — it responds to offers.
@@ -214,7 +215,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
             throw e
         } catch (e: Exception) {
             tracer.log("tunnel", "join.failed", mapOf("error" to e.toString()))
-            if (!isClosed()) setState(RelayClient.State.Closed("join: ${e.message}"))
+            if (!isClosed()) setState(RelayState.Closed("join: ${e.message}"))
         }
     }
 
@@ -243,14 +244,14 @@ class TunnelTransport(private val tracer: RelayTracer) {
         if (hop === pendingHop) {
             abortPending("pending_read_error")
         } else if (hop === currentHop && hopState == HopState.STEADY && !isClosed()) {
-            setState(RelayClient.State.Closed(if (peerSaidBye) "peer" else "tunnel closed"))
+            setState(RelayState.Closed(if (peerSaidBye) "peer" else "tunnel closed"))
         }
     }
 
     private fun handleFrame(frame: ByteArray, hop: Hop) {
         // Peer: first frame on the pending hop (after we acked) proves the host
         // has switched — promote, then process this frame on the now-current hop.
-        if (hop === pendingHop && role == RelayClient.Role.Peer && hopState == HopState.AWAITING_FIRST_FRAME) {
+        if (hop === pendingHop && role == RelayRole.Peer && hopState == HopState.AWAITING_FIRST_FRAME) {
             tracer.log("tunnel", "hop.first_frame_received", mapOf("nextRoutingId" to (pendingRoutingId ?: "")))
             promoteHop()
         }
@@ -272,11 +273,11 @@ class TunnelTransport(private val tracer: RelayTracer) {
                 tracer.log("tunnel", "bye.received", mapOf("reason" to message.reason))
                 if (message.reason != "hop") {        // "hop" = expected end of an old hop
                     peerSaidBye = true
-                    setState(RelayClient.State.Closed("peer: ${message.reason}"))
+                    setState(RelayState.Closed("peer: ${message.reason}"))
                 }
             }
             is RelayMessage.HandoffOffer -> {
-                if (role == RelayClient.Role.Peer) {
+                if (role == RelayRole.Peer) {
                     tracer.log("tunnel", "hop.offer_received", mapOf(
                         "nextRoutingId" to message.payload.nextRoutingId,
                         "nextMinute" to message.payload.nextMinute
@@ -287,7 +288,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
                 }
             }
             is RelayMessage.HandoffAck -> {
-                if (role == RelayClient.Role.Host) {
+                if (role == RelayRole.Host) {
                     tracer.log("tunnel", "hop.ack_received", mapOf(
                         "nextRoutingId" to message.payload.nextRoutingId,
                         "connected" to message.payload.connected
@@ -303,11 +304,11 @@ class TunnelTransport(private val tracer: RelayTracer) {
     // ---- Host-side handoff ----
 
     private fun startHandoffTimer() {
-        if (role != RelayClient.Role.Host) return
+        if (role != RelayRole.Host) return
         handoffJob = scope.launch {
             while (isActive) {
                 delay(HANDOFF_INTERVAL_MS)
-                if (_state.value !is RelayClient.State.Open) break
+                if (_state.value !is RelayState.Open) break
                 if (hopState != HopState.STEADY) continue
                 initiateHandoff()
             }
@@ -459,7 +460,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
         heartbeatJob = scope.launch {
             while (isActive) {
                 delay(2_000)
-                if (_state.value !is RelayClient.State.Open) continue
+                if (_state.value !is RelayState.Open) continue
                 val hop = currentHop ?: continue
                 try {
                     sendControl(hop, RelayMessage.Heartbeat(RelayHeartbeat(Instant.now().toString(), emptyList())))
@@ -489,27 +490,27 @@ class TunnelTransport(private val tracer: RelayTracer) {
         currentHop = null
         pendingHop = null
         if (!isClosed()) {
-            setState(RelayClient.State.Closed(
+            setState(RelayState.Closed(
                 if (userInitiated) "user" else if (peerSaidBye) "peer" else "closed"))
         }
     }
 
-    private fun isClosed(): Boolean = _state.value is RelayClient.State.Closed
+    private fun isClosed(): Boolean = _state.value is RelayState.Closed
 
-    private fun setState(newState: RelayClient.State) {
+    private fun setState(newState: RelayState) {
         if (_state.value == newState) return
         _state.value = newState
         tracer.log("tunnel", "state.change", mapOf("transport" to "cable-tunnel", "to" to label(newState)))
         for (l in stateListeners) l(newState)
     }
 
-    private fun label(s: RelayClient.State): String = when (s) {
-        is RelayClient.State.Idle -> "idle"
-        is RelayClient.State.Hosting -> "hosting"
-        is RelayClient.State.Joining -> "joining"
-        is RelayClient.State.Negotiating -> "negotiating"
-        is RelayClient.State.Open -> "open(${s.role.name.lowercase()})"
-        is RelayClient.State.Closed -> "closed(${s.reason})"
+    private fun label(s: RelayState): String = when (s) {
+        is RelayState.Idle -> "idle"
+        is RelayState.Hosting -> "hosting"
+        is RelayState.Joining -> "joining"
+        is RelayState.Negotiating -> "negotiating"
+        is RelayState.Open -> "open(${s.role.name.lowercase()})"
+        is RelayState.Closed -> "closed(${s.reason})"
     }
 
     companion object {
