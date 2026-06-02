@@ -144,6 +144,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
     }
 
     private suspend fun hostInternal(code: String) {
+        resetSession()
         this.code = code
         role = RelayRole.Host
         val keys = TunnelKeyDerivation.derive(code)
@@ -182,6 +183,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
     }
 
     private suspend fun joinInternal(token: String) {
+        resetSession()
         val parsed = TunnelKeyDerivation.parseToken(token)
         if (parsed == null) {
             setState(RelayState.Closed("join: bad token"))
@@ -497,6 +499,29 @@ class TunnelTransport(private val tracer: RelayTracer) {
             setState(RelayState.Closed(
                 if (userInitiated) "user" else if (peerSaidBye) "peer" else "closed"))
         }
+    }
+
+    /**
+     * Wipe per-session state at the start of a new host()/join() so a previous
+     * session's hop count, message counters, token, and `disposed` flag don't
+     * bleed into the new one. Cancels any timers/hops that survived the prior
+     * dispose() for belt-and-braces safety.
+     */
+    private fun resetSession() {
+        _hopNumber.value = 0
+        _messagesSent.value = 0
+        _messagesReceived.value = 0
+        _heartbeatCount.value = 0
+        _token.value = null
+        disposed = false
+        userInitiated = false
+        peerSaidBye = false
+        pendingRoutingId = null
+        hopState = HopState.STEADY
+        heartbeatJob?.cancel(); heartbeatJob = null
+        handoffJob?.cancel(); handoffJob = null
+        currentHop?.close(); currentHop = null
+        pendingHop?.close(); pendingHop = null
     }
 
     private fun isClosed(): Boolean = _state.value is RelayState.Closed

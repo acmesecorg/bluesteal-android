@@ -34,8 +34,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import org.crainiate.bluesteal.services.AdvertRelay
 import org.crainiate.bluesteal.services.PairingCode
@@ -130,13 +132,33 @@ private fun stateLabel(state: RelayState): String = when (state) {
 @Composable
 private fun IdleControls(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
     var showJoinField by remember { mutableStateOf(false) }
-    var joinInput by remember { mutableStateOf("") }
+    // TextFieldValue (text + cursor) is used instead of a plain String so that
+    // when the formatter strips a blocked character (e.g. '-') and the text
+    // doesn't change, Compose still gets a new object and re-renders the field
+    // — otherwise the blocked character appears to "stick".
+    var joinInput by remember { mutableStateOf(TextFieldValue("")) }
 
     if (showJoinField) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = joinInput,
-                onValueChange = { joinInput = it.uppercase().trim() },
+                onValueChange = { new ->
+                    val formatted = formatTokenInput(new.text)
+                    // Map cursor via logical alphanum position so the
+                    // auto-inserted dash doesn't shift it by one:
+                    // 1. Count how many alphanum chars precede the cursor in
+                    //    the raw text (which may or may not already have a dash
+                    //    from a prior format pass).
+                    // 2. Place that logical position in the formatted string,
+                    //    adding 1 to skip past the dash at index 5.
+                    val logicalPos = new.text.take(new.selection.end)
+                        .count { it.isLetterOrDigit() }
+                    val cursor = if (logicalPos >= 5 && formatted.length > 5)
+                        minOf(logicalPos + 1, formatted.length)
+                    else
+                        minOf(logicalPos, formatted.length)
+                    joinInput = TextFieldValue(formatted, TextRange(cursor))
+                },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("token (e.g. ABCDE-123456)") },
@@ -149,15 +171,15 @@ private fun IdleControls(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
                 Spacer(modifier = Modifier.weight(1f))
                 TextButton(onClick = {
                     showJoinField = false
-                    joinInput = ""
+                    joinInput = TextFieldValue("")
                 }) { Text("Cancel") }
                 Button(
                     onClick = {
-                        submitJoin(joinInput, advertRelay, tunnel)
+                        submitJoin(joinInput.text, advertRelay, tunnel)
                         showJoinField = false
-                        joinInput = ""
+                        joinInput = TextFieldValue("")
                     },
-                    enabled = joinInputValid(joinInput)
+                    enabled = joinInputValid(joinInput.text)
                 ) { Text("Connect") }
             }
         }
@@ -321,3 +343,14 @@ private fun cancelOrDisconnect(advertRelay: AdvertRelay, tunnel: TunnelTransport
 
 private fun joinInputValid(input: String): Boolean =
     TunnelKeyDerivation.isTunnelToken(input.trim())
+
+/**
+ * Strip non-alphanumeric, uppercase, cap at 11 raw chars (5-char code + 6 hex
+ * routing). Auto-insert the "-" separator at position 5 so the user never has
+ * to type it — and they can't, since '-' is filtered out.
+ */
+private fun formatTokenInput(raw: String): String {
+    val clean = raw.uppercase().filter { it.isLetterOrDigit() }.take(11)
+    return if (clean.length < 5) clean
+    else clean.substring(0, 5) + "-" + clean.substring(5)
+}
