@@ -2,6 +2,11 @@ package org.crainiate.bluesteal
 
 import android.app.Application
 import android.os.Build
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.crainiate.bluesteal.logging.JsonlLogger
 import org.crainiate.bluesteal.logging.RelayTracer
 import org.crainiate.bluesteal.services.AdvertRelay
@@ -9,7 +14,9 @@ import org.crainiate.bluesteal.services.AdvertStore
 import org.crainiate.bluesteal.services.BleAdvertiser
 import org.crainiate.bluesteal.services.CableScanner
 import org.crainiate.bluesteal.services.PairingCode
+import org.crainiate.bluesteal.services.QRRelay
 import org.crainiate.bluesteal.services.RebroadcastService
+import org.crainiate.bluesteal.services.RelayState
 import org.crainiate.bluesteal.services.tunnel.TunnelTransport
 
 /**
@@ -33,6 +40,10 @@ class BluestealApp : Application() {
         private set
     lateinit var rebroadcast: RebroadcastService
         private set
+    lateinit var qrRelay: QRRelay
+        private set
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onCreate() {
         super.onCreate()
@@ -59,9 +70,13 @@ class BluestealApp : Application() {
         advertRelay = AdvertRelay(store = store, tracer = tracer)
         bleAdvertiser = BleAdvertiser(this, tracer)
         // caBLE tunnel transport — the only transport. Inbound decrypted frames
-        // are routed into the advert path.
+        // are routed to the QR display modal if they're shared QR codes,
+        // otherwise into the advert path.
         tunnel = TunnelTransport(tracer)
-        tunnel.onFrame = { bytes -> advertRelay.handleTunnelFrame(bytes) }
+        qrRelay = QRRelay(tunnel, tracer)
+        tunnel.onFrame = { bytes ->
+            if (!qrRelay.tryHandle(bytes)) advertRelay.handleTunnelFrame(bytes)
+        }
         rebroadcast = RebroadcastService(
             advertRelay = advertRelay,
             advertiser = bleAdvertiser,
@@ -89,5 +104,22 @@ class BluestealApp : Application() {
     fun beginJoin(token: String) {
         advertRelay.tunnelSend = { bytes -> tunnel.send(bytes) }
         tunnel.join(token.trim().uppercase())
+    }
+
+    /**
+     * Test affordance: host and, once a peer connects, send the URI as a QR —
+     * for headless verification of the share path (mirrors iOS `-sendqr`).
+     */
+    fun beginSendQrOnOpen(uri: String) {
+        beginHost()
+        scope.launch {
+            repeat(120) {
+                delay(500)
+                if (tunnel.state.value is RelayState.Open) {
+                    qrRelay.send(uri)
+                    return@launch
+                }
+            }
+        }
     }
 }

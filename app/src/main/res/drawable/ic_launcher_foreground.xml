@@ -1,15 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- bluesteal app icon foreground: solid ring + two vertical triangles, scaled
+     so the whole mark sits inside the 72dp adaptive-icon safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#F0F8FF"
-        android:pathData="M54,16a38,38 0 1,0 0.001,0z" />
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M23.04,54 a30.96,30.96 0 1,0 61.92,0 a30.96,30.96 0 1,0 -61.92,0 Z M30.096,54 a23.904,23.904 0 1,0 47.808,0 a23.904,23.904 0 1,0 -47.808,0 Z" />
     <path
-        android:fillColor="#1BA7E3"
-        android:pathData="M54,23a31,31 0 1,0 0.001,0z" />
-    <path
-        android:fillColor="#F0F8FF"
-        android:pathData="M54,33l8,16h-16zM54,75l-8,-16h16z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,39.96 L48.42,51.84 L59.58,51.84 Z M54,68.04 L48.42,56.16 L59.58,56.16 Z" />
 </vector>

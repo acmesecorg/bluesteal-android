@@ -13,8 +13,8 @@ android {
         applicationId = "org.crainiate.bluesteal"
         minSdk = 26                // Android 8.0 — solid BluetoothLeAdvertiser support
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 5
+        versionName = "0.1.4"
     }
 
     buildTypes {
@@ -79,6 +79,9 @@ dependencies {
     // caBLE tunnel side-channel: WebSocket transport + EC math
     implementation(libs.okhttp)
     implementation(libs.bouncycastle.prov)
+
+    // QR scan (camera) + generation
+    implementation(libs.zxing.embedded)
 
     // Tooling
     debugImplementation(libs.androidx.ui.tooling)

@@ -116,6 +116,9 @@ class AdvertRelay(
                 // Tunnel-transport control frames; handled inside TunnelTransport,
                 // never surfaced on this inbound path.
             }
+            is RelayMessage.Qr -> {
+                // Shared QR codes are routed to QRRelay before reaching here.
+            }
         }
     }
 

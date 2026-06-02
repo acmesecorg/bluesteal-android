@@ -46,7 +46,19 @@ sealed class RelayMessage {
      */
     data class HandoffOffer(val payload: RelayHandoffOffer) : RelayMessage()
     data class HandoffAck(val payload: RelayHandoffAck) : RelayMessage()
+
+    /**
+     * A `FIDO:/` QR string shared to/from the peer for display (scan-and-share
+     * convenience feature). Additive; peers without the case ignore it.
+     */
+    data class Qr(val payload: RelayQr) : RelayMessage()
 }
+
+/** A scanned `FIDO:/` QR string, relayed to the peer to render and display. */
+@Serializable
+data class RelayQr(
+    val uri: String
+)
 
 /** Lossy projection of a [CableAdvert] for the wire. */
 @Serializable
@@ -135,6 +147,10 @@ internal object RelayMessageSerializer : KSerializer<RelayMessage> {
                 put("type", JsonPrimitive("handoffAck"))
                 put("payload", json.encodeToJsonElement(RelayHandoffAck.serializer(), value.payload))
             }
+            is RelayMessage.Qr -> buildJsonObject {
+                put("type", JsonPrimitive("qr"))
+                put("payload", json.encodeToJsonElement(RelayQr.serializer(), value.payload))
+            }
         }
         jsonEnc.encodeJsonElement(obj)
     }
@@ -167,6 +183,10 @@ internal object RelayMessageSerializer : KSerializer<RelayMessage> {
                 val payload = obj["payload"] ?: error("handoffAck missing payload")
                 RelayMessage.HandoffAck(json.decodeFromJsonElement(RelayHandoffAck.serializer(), payload))
             }
+            "qr" -> {
+                val payload = obj["payload"] ?: error("qr missing payload")
+                RelayMessage.Qr(json.decodeFromJsonElement(RelayQr.serializer(), payload))
+            }
             else -> error("Unknown RelayMessage type: $type")
         }
     }
@@ -179,4 +199,5 @@ internal fun RelayMessage.typeName(): String = when (this) {
     is RelayMessage.Bye -> "bye"
     is RelayMessage.HandoffOffer -> "handoffOffer"
     is RelayMessage.HandoffAck -> "handoffAck"
+    is RelayMessage.Qr -> "qr"
 }

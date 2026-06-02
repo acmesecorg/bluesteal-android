@@ -93,7 +93,17 @@ class MainActivity : ComponentActivity() {
      *   adb shell am start -n org.crainiate.bluesteal/.ui.MainActivity --es join ABCDE-123456
      */
     private fun handleAutoDrive(app: BluestealApp) {
+        val sendqr = intent?.getStringExtra("sendqr")
+        val showqr = intent?.getStringExtra("showqr")
         when {
+            sendqr != null -> {
+                app.tracer.log("app", "app.autosendqr", mapOf("len" to sendqr.length))
+                app.beginSendQrOnOpen(sendqr)
+            }
+            showqr != null -> {
+                app.tracer.log("app", "app.autoshowqr", mapOf("len" to showqr.length))
+                app.qrRelay.show(showqr)
+            }
             intent?.getBooleanExtra("host", false) == true -> {
                 app.tracer.log("app", "app.autohost")
                 app.beginHost()

@@ -269,6 +269,10 @@ class TunnelTransport(private val tracer: RelayTracer) {
                 _messagesReceived.value += 1
                 onFrame?.invoke(frame)
             }
+            is RelayMessage.Qr -> {
+                _messagesReceived.value += 1
+                onFrame?.invoke(frame)
+            }
             is RelayMessage.Bye -> {
                 tracer.log("tunnel", "bye.received", mapOf("reason" to message.reason))
                 if (message.reason != "hop") {        // "hop" = expected end of an old hop
