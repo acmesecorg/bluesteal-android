@@ -68,7 +68,7 @@ fun ContentView(app: BluestealApp) {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Bluesteal") },
+                title = { Text("Blue Steal") },
                 actions = {
                     IconButton(onClick = {
                         scanLauncher.launch(ScanOptions().apply {
