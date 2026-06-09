@@ -16,7 +16,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
@@ -73,13 +76,13 @@ fun ScannedResultSheet(
     onSend: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var copied by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Scanned FIDO QR", style = MaterialTheme.typography.titleMedium)
             QrCodeImage(uri, Modifier.size(220.dp))
             Text(
                 uri,
@@ -88,18 +91,19 @@ fun ScannedResultSheet(
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onCopy) { Text("Copy") }
-                if (canSend) {
-                    Button(onClick = { onSend(); onDismiss() }) { Text("Send") }
-                }
-            }
-            if (!canSend) {
-                Text(
-                    "Connect to a peer (Host or join) to send.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onCopy(); copied = true },
+                    modifier = Modifier.weight(1f)
+                ) { Text(if (copied) "Copied" else "Copy") }
+                Button(
+                    onClick = { onSend(); onDismiss() },
+                    enabled = canSend,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Send") }
             }
         }
     }
@@ -115,14 +119,13 @@ fun ReceivedQrSheet(uri: String, onDismiss: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("QR from peer", style = MaterialTheme.typography.titleMedium)
+            Text("QR Code Received", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Scan this with your phone",
+                "Scan with another device",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             QrCodeImage(uri, Modifier.size(260.dp))
-            Button(onClick = onDismiss) { Text("Done") }
         }
     }
 }

@@ -28,10 +28,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import android.os.PersistableBundle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
@@ -54,7 +59,7 @@ import org.crainiate.bluesteal.services.RelayState
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContentView(app: BluestealApp) {
-    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     val tunnelState by app.tunnel.state.collectAsState()
     val canSend = tunnelState is RelayState.Open
     var scanned by remember { mutableStateOf<String?>(null) }
@@ -75,7 +80,8 @@ fun ContentView(app: BluestealApp) {
                             setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                             setPrompt("Point at a FIDO QR code")
                             setBeepEnabled(false)
-                            setOrientationLocked(false)
+                            setOrientationLocked(true)
+                            setCaptureActivity(PortraitCaptureActivity::class.java)
                         })
                     }) {
                         Icon(Icons.Filled.QrCodeScanner, contentDescription = "Scan QR code")
@@ -106,7 +112,7 @@ fun ContentView(app: BluestealApp) {
         ScannedResultSheet(
             uri = uri,
             canSend = canSend,
-            onCopy = { clipboard.setText(AnnotatedString(uri)) },
+            onCopy = { copyPlainText(context, uri) },
             onSend = { app.qrRelay.send(uri) },
             onDismiss = { scanned = null }
         )
@@ -180,6 +186,22 @@ private fun AdvertList(app: BluestealApp) {
             }
         }
     }
+}
+
+/**
+ * Plain-text clipboard copy. Flagged sensitive so Android 13+ doesn't preview the
+ * full FIDO:/ URI in its clipboard confirmation chip. The in-sheet button shows
+ * "Copied"; the small system chip on 13+ is OS-level and can't be suppressed.
+ */
+private fun copyPlainText(context: Context, text: String) {
+    val clip = ClipData.newPlainText("FIDO QR", text)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+    }
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(clip)
 }
 
 @Composable
