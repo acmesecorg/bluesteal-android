@@ -143,7 +143,7 @@ private fun AdvertList(app: BluestealApp) {
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "Waiting for caBLE adverts",
+                "Waiting for adverts",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )

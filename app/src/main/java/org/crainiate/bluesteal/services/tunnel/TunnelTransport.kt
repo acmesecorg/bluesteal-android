@@ -71,6 +71,14 @@ class TunnelTransport(private val tracer: RelayTracer) {
     private val _heartbeatCount = MutableStateFlow(0)
     val heartbeatCount: StateFlow<Int> = _heartbeatCount.asStateFlow()
 
+    /**
+     * caBLE tunnel-server domain resolved for the current session — e.g.
+     * "cable.ua5v.com" (Google) or "cable.auth.com" (Apple). Surfaced in the
+     * "tunnel open" status so we can tell which provider's tunnel was used.
+     */
+    private val _tunnelDomain = MutableStateFlow("cable.ua5v.com")
+    val tunnelDomain: StateFlow<String> = _tunnelDomain.asStateFlow()
+
     /** Decrypted advert/unknown frames (raw JSON bytes) for AdvertRelay. */
     var onFrame: ((ByteArray) -> Unit)? = null
 
@@ -150,6 +158,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
         val keys = TunnelKeyDerivation.derive(code)
         this.keys = keys
         host = TunnelServerDomain.get(keys.tunnelServerId) ?: "cable.ua5v.com"
+        _tunnelDomain.value = host
         tracer.setContext("Host", code)
         setState(RelayState.Hosting(code))
 
@@ -195,6 +204,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
         val keys = TunnelKeyDerivation.derive(code)
         this.keys = keys
         host = TunnelServerDomain.get(keys.tunnelServerId) ?: "cable.ua5v.com"
+        _tunnelDomain.value = host
         tracer.setContext("Peer", code)
         setState(RelayState.Joining(code))
 

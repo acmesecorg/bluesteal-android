@@ -58,6 +58,7 @@ fun RelayView(
     tunnel: TunnelTransport
 ) {
     val state by tunnel.state.collectAsState()
+    val domain by tunnel.tunnelDomain.collectAsState()
 
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
         Column(
@@ -67,7 +68,7 @@ fun RelayView(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusBadge(state = state)
+                StatusBadge(state = state, domain = domain)
             }
 
             when (state) {
@@ -82,7 +83,7 @@ fun RelayView(
 
                 is RelayState.Joining, is RelayState.Negotiating ->
                     NegotiatingControls(
-                        label = stateLabel(state),
+                        label = stateLabel(state, domain),
                         onCancel = { cancelOrDisconnect(advertRelay, tunnel) }
                     )
 
@@ -98,7 +99,7 @@ fun RelayView(
 }
 
 @Composable
-private fun StatusBadge(state: RelayState) {
+private fun StatusBadge(state: RelayState, domain: String) {
     val color = when (state) {
         is RelayState.Idle, is RelayState.Closed -> Color.Gray
         is RelayState.Hosting,
@@ -114,16 +115,16 @@ private fun StatusBadge(state: RelayState) {
                 .clip(CircleShape)
                 .background(color)
         )
-        Text("Relay · " + stateLabel(state), style = MaterialTheme.typography.bodyMedium)
+        Text("Relay · " + stateLabel(state, domain), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
-private fun stateLabel(state: RelayState): String = when (state) {
+private fun stateLabel(state: RelayState, domain: String): String = when (state) {
     is RelayState.Idle -> "idle"
     is RelayState.Hosting -> "tunnel hosting"
     is RelayState.Joining -> "tunnel joining ${state.code}"
     is RelayState.Negotiating -> "tunnel negotiating"
-    is RelayState.Open -> "tunnel open"
+    is RelayState.Open -> "tunnel open ($domain)"
     is RelayState.Closed -> "closed (${state.reason})"
 }
 
