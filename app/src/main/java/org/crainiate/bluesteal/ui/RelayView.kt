@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import org.crainiate.bluesteal.BuildConfig
 import org.crainiate.bluesteal.services.AdvertRelay
 import org.crainiate.bluesteal.services.PairingCode
 import org.crainiate.bluesteal.services.RebroadcastService
@@ -192,6 +193,10 @@ private fun IdleControls(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
             Spacer(modifier = Modifier.weight(1f))
             Button(onClick = { startTunnelHost(advertRelay, tunnel) }) { Text("Host") }
             OutlinedButton(onClick = { showJoinField = true }) { Text("Join…") }
+            if (BuildConfig.RENDEZVOUS_BASE_URL.isNotBlank() &&
+                BuildConfig.RENDEZVOUS_ROOM.isNotBlank()) {
+                OutlinedButton(onClick = { startRendezvousJoin(advertRelay, tunnel) }) { Text("Room") }
+            }
         }
     }
 }
@@ -328,6 +333,11 @@ private fun wireTunnelSend(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
 private fun startTunnelHost(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
     wireTunnelSend(advertRelay, tunnel)
     tunnel.host(PairingCode.make())
+}
+
+private fun startRendezvousJoin(advertRelay: AdvertRelay, tunnel: TunnelTransport) {
+    wireTunnelSend(advertRelay, tunnel)
+    tunnel.joinViaRendezvous(BuildConfig.RENDEZVOUS_ROOM)
 }
 
 private fun submitJoin(rawInput: String, advertRelay: AdvertRelay, tunnel: TunnelTransport) {

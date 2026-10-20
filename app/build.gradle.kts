@@ -1,9 +1,21 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// Rendezvous config comes from local.properties (gitignored) so the base URL
+// and bearer are never committed to this public repo. Blank by default
+// (rendezvous disabled). See local.properties.example.
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun rendezvousProp(key: String): String =
+    (localProps.getProperty(key) ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
 
 android {
     namespace = "org.crainiate.bluesteal"
@@ -15,6 +27,10 @@ android {
         targetSdk = 35
         versionCode = 6
         versionName = "0.1.5"
+
+        buildConfigField("String", "RENDEZVOUS_BASE_URL", "\"${rendezvousProp("rendezvous.baseUrl")}\"")
+        buildConfigField("String", "RENDEZVOUS_KEY", "\"${rendezvousProp("rendezvous.key")}\"")
+        buildConfigField("String", "RENDEZVOUS_ROOM", "\"${rendezvousProp("rendezvous.room")}\"")
     }
 
     buildTypes {
@@ -43,6 +59,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {

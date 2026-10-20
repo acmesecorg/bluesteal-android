@@ -2,15 +2,18 @@ package org.crainiate.bluesteal.services.tunnel
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.json.Json
 import org.crainiate.bluesteal.crypto.cable.TunnelServerDomain
 import org.crainiate.bluesteal.logging.RelayTracer
@@ -112,6 +115,20 @@ class TunnelTransport(private val tracer: RelayTracer) {
     private var heartbeatJob: Job? = null
     private var handoffJob: Job? = null
 
+    /** Peer-side rendezvous poll/join loop (the "two rooms" demo). */
+    private var rendezvousJob: Job? = null
+
+    /** Room of the active rendezvous join; non-null = re-join on a non-user drop
+     *  (self-heal). Cleared only on a user disconnect. */
+    private var rendezvousRoom: String? = null
+
+    /** Peer-liveness watchdog: the host heartbeats every 2s, so if nothing
+     *  arrives for `PEER_SILENCE_MS` while open, treat the host as gone and
+     *  re-join via the rendezvous — recovers from a host drop in ~15s instead
+     *  of waiting for the ~60s socket error. */
+    private var livenessJob: Job? = null
+    @Volatile private var lastFrameAt = System.currentTimeMillis()
+
     // ---- Public API ----
 
     fun host(code: String) {
@@ -120,6 +137,75 @@ class TunnelTransport(private val tracer: RelayTracer) {
 
     fun join(token: String) {
         scope.launch { joinInternal(token) }
+    }
+
+    /**
+     * Peer-side rendezvous join for the "two rooms" demo: polls the shared
+     * [room] for the host's latest token and joins, retrying across the host's
+     * ~60s routing_id rotations until connected or cancelled.
+     */
+    fun joinViaRendezvous(room: String) {
+        rendezvousRoom = room
+        rendezvousJob?.cancel()
+        rendezvousJob = scope.launch { joinViaRendezvousInternal(room) }
+    }
+
+    /** Self-heal: on a non-user drop of a rendezvous session, re-poll and
+     *  re-join after a short backoff (the host needs a moment to re-register
+     *  and republish its fresh token). No-op after a user disconnect. */
+    private fun restartRendezvousJoin(reason: String) {
+        val room = rendezvousRoom ?: return
+        if (userInitiated || disposed) return
+        tracer.log("rendezvous", "self_heal", mapOf("reason" to reason, "room" to room))
+        setState(RelayState.Joining(room))
+        rendezvousJob?.cancel()
+        rendezvousJob = scope.launch {
+            delay(1500)
+            if (!disposed && !userInitiated) joinViaRendezvousInternal(room)
+        }
+    }
+
+    private fun startLivenessWatchdog() {
+        livenessJob?.cancel()
+        livenessJob = scope.launch {
+            while (coroutineContext.isActive && !disposed) {
+                delay(3000)
+                if (_state.value !is RelayState.Open) continue
+                if (role == RelayRole.Peer && rendezvousRoom != null &&
+                    System.currentTimeMillis() - lastFrameAt > PEER_SILENCE_MS) {
+                    tracer.log("tunnel", "peer.host_silent",
+                        mapOf("silentForMs" to (System.currentTimeMillis() - lastFrameAt)))
+                    restartRendezvousJoin("host_timeout")
+                    return@launch
+                }
+            }
+        }
+    }
+
+    private suspend fun joinViaRendezvousInternal(room: String) {
+        val rv = RendezvousClient(tracer)
+        if (!rv.isConfigured) {
+            setState(RelayState.Closed("rendezvous not configured"))
+            return
+        }
+        tracer.log("rendezvous", "join.begin", mapOf("room" to room))
+        var attempt = 0
+        while (coroutineContext.isActive && !disposed) {
+            attempt += 1
+            setState(RelayState.Joining(room))
+            val token = withContext(Dispatchers.IO) { rv.fetch(room) }
+            if (token != null && TunnelKeyDerivation.isTunnelToken(token)) {
+                tracer.log("rendezvous", "join.try", mapOf("attempt" to attempt))
+                joinInternal(token.uppercase())   // resets session, sets Open or Closed
+                if (_state.value is RelayState.Open) {
+                    rendezvousJob = null
+                    return
+                }
+                // Stale token (raced a rotation) — fall through and re-poll.
+            }
+            if (disposed) return
+            delay(2000)
+        }
     }
 
     fun send(data: ByteArray) {
@@ -220,8 +306,10 @@ class TunnelTransport(private val tracer: RelayTracer) {
             val hop = Hop(session, routingId)
             currentHop = hop
             setState(RelayState.Open(RelayRole.Peer))
+            lastFrameAt = System.currentTimeMillis()
             startReadLoop(hop)
             startHeartbeat()
+            startLivenessWatchdog()
             // Peer does not initiate handoffs — it responds to offers.
         } catch (e: CancellationException) {
             throw e
@@ -256,11 +344,16 @@ class TunnelTransport(private val tracer: RelayTracer) {
         if (hop === pendingHop) {
             abortPending("pending_read_error")
         } else if (hop === currentHop && hopState == HopState.STEADY && !isClosed()) {
-            setState(RelayState.Closed(if (peerSaidBye) "peer" else "tunnel closed"))
+            if (rendezvousRoom != null && !userInitiated) {
+                restartRendezvousJoin(if (peerSaidBye) "peer_bye" else "tunnel_closed")
+            } else {
+                setState(RelayState.Closed(if (peerSaidBye) "peer" else "tunnel closed"))
+            }
         }
     }
 
     private fun handleFrame(frame: ByteArray, hop: Hop) {
+        lastFrameAt = System.currentTimeMillis()   // proof of life for the watchdog
         // Peer: first frame on the pending hop (after we acked) proves the host
         // has switched — promote, then process this frame on the now-current hop.
         if (hop === pendingHop && role == RelayRole.Peer && hopState == HopState.AWAITING_FIRST_FRAME) {
@@ -289,7 +382,11 @@ class TunnelTransport(private val tracer: RelayTracer) {
                 tracer.log("tunnel", "bye.received", mapOf("reason" to message.reason))
                 if (message.reason != "hop") {        // "hop" = expected end of an old hop
                     peerSaidBye = true
-                    setState(RelayState.Closed("peer: ${message.reason}"))
+                    if (rendezvousRoom != null && !userInitiated) {
+                        restartRendezvousJoin("peer_bye")
+                    } else {
+                        setState(RelayState.Closed("peer: ${message.reason}"))
+                    }
                 }
             }
             is RelayMessage.HandoffOffer -> {
@@ -499,6 +596,9 @@ class TunnelTransport(private val tracer: RelayTracer) {
     private fun dispose() {
         if (disposed) return
         disposed = true
+        rendezvousJob?.cancel(); rendezvousJob = null
+        rendezvousRoom = null
+        livenessJob?.cancel(); livenessJob = null
         heartbeatJob?.cancel()
         handoffJob?.cancel()
         currentHop?.close()
@@ -528,6 +628,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
         peerSaidBye = false
         pendingRoutingId = null
         hopState = HopState.STEADY
+        livenessJob?.cancel(); livenessJob = null
         heartbeatJob?.cancel(); heartbeatJob = null
         handoffJob?.cancel(); handoffJob = null
         currentHop?.close(); currentHop = null
@@ -555,6 +656,7 @@ class TunnelTransport(private val tracer: RelayTracer) {
     companion object {
         private const val HANDOFF_INTERVAL_S = 30L
         private const val HANDOFF_INTERVAL_MS = 30_000L
+        private const val PEER_SILENCE_MS = 15_000L   // host-liveness watchdog
         private const val HOST_ACK_TIMEOUT_S = 50L
         private const val PEER_FIRST_FRAME_TIMEOUT_S = 55L
         private const val OLD_HOP_LINGER_S = 15L

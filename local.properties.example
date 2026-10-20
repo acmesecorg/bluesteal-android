@@ -11,3 +11,10 @@ sdk.dir=/Users/<you>/Library/Android/sdk
 # Leave blank to fall back to STUN-only (no TURN relay path).
 TURN_USERNAME=
 TURN_CREDENTIAL=
+
+# Pairing rendezvous (bluesteal/tools/rendezvous worker) — the out-of-band
+# token drop for the "two rooms" demo. Leave blank to disable rendezvous join.
+# The base URL and key are NEVER committed (this is why they live here).
+rendezvous.baseUrl=
+rendezvous.key=
+rendezvous.room=

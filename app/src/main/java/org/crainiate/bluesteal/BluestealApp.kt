@@ -16,6 +16,7 @@ import org.crainiate.bluesteal.services.CableScanner
 import org.crainiate.bluesteal.services.PairingCode
 import org.crainiate.bluesteal.services.QRRelay
 import org.crainiate.bluesteal.services.RebroadcastService
+import org.crainiate.bluesteal.services.RelayForegroundService
 import org.crainiate.bluesteal.services.RelayState
 import org.crainiate.bluesteal.services.tunnel.TunnelTransport
 
@@ -92,6 +93,26 @@ class BluestealApp : Application() {
         // Wire the scanner output into the store. The scanner runs on a BLE
         // worker thread; AdvertStore is thread-safe.
         scanner.onEvent = { event -> store.ingest(event) }
+
+        // Keep the relay alive while backgrounded / screen-locked: run a
+        // connectedDevice foreground service for the duration of a session.
+        // Start only on the inactive->active edge (which happens on the user's
+        // Host/Join tap, i.e. in the foreground, so the FGS-start is allowed);
+        // stop on the active->inactive edge. Self-heal keeps the state active
+        // (Joining/Hosting), so a drop never stops or background-restarts it.
+        scope.launch {
+            var wasActive = false
+            tunnel.state.collect { s ->
+                val active = s is RelayState.Hosting || s is RelayState.Joining ||
+                    s is RelayState.Negotiating || s is RelayState.Open
+                if (active && !wasActive) {
+                    RelayForegroundService.start(this@BluestealApp)
+                } else if (!active && wasActive) {
+                    RelayForegroundService.stop(this@BluestealApp)
+                }
+                wasActive = active
+            }
+        }
     }
 
     /** Wire outbound adverts through the tunnel and start hosting. */
