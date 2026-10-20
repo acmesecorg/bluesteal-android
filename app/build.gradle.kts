@@ -25,8 +25,8 @@ android {
         applicationId = "org.crainiate.bluesteal"
         minSdk = 26                // Android 8.0 — solid BluetoothLeAdvertiser support
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "1.0.7"
 
         buildConfigField("String", "RENDEZVOUS_BASE_URL", "\"${rendezvousProp("rendezvous.baseUrl")}\"")
         buildConfigField("String", "RENDEZVOUS_KEY", "\"${rendezvousProp("rendezvous.key")}\"")

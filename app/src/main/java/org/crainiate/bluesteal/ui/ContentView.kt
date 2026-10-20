@@ -24,6 +24,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import org.crainiate.bluesteal.BuildConfig
 import org.crainiate.bluesteal.BluestealApp
 import org.crainiate.bluesteal.services.RelayState
 
@@ -56,10 +59,29 @@ import org.crainiate.bluesteal.services.RelayState
  * Compose composables read state via `StateFlow.collectAsState`; service
  * singletons live on [BluestealApp] (Application).
  */
+/** Human-visible build tag shown in the top-left (the real versionName), so two
+ *  devices can be glanced-at and confirmed on the same build. */
+private val BUILD_TAG = "v" + BuildConfig.VERSION_NAME
+
+/** Current IPv4 of the active interface (Wi-Fi wlan0 preferred), shown under the
+ *  version so you can see which network the device is on. No permission needed. */
+private fun localIpAddress(): String = try {
+    java.net.NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        .sortedByDescending { it.name.startsWith("wlan") }
+        .flatMap { it.inetAddresses.toList() }
+        .firstOrNull { !it.isLoopbackAddress && it is java.net.Inet4Address }
+        ?.hostAddress ?: "—"
+} catch (e: Exception) { "—" }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContentView(app: BluestealApp) {
     val context = LocalContext.current
+    var ipAddr by remember { mutableStateOf(localIpAddress()) }
+    LaunchedEffect(Unit) {
+        while (true) { ipAddr = localIpAddress(); delay(5000) }
+    }
     val tunnelState by app.tunnel.state.collectAsState()
     val canSend = tunnelState is RelayState.Open
     var scanned by remember { mutableStateOf<String?>(null) }
@@ -74,6 +96,20 @@ fun ContentView(app: BluestealApp) {
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Blue Steal") },
+                navigationIcon = {
+                    Column(modifier = Modifier.padding(start = 12.dp)) {
+                        Text(
+                            BUILD_TAG,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            ipAddr,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
                 actions = {
                     IconButton(onClick = {
                         scanLauncher.launch(ScanOptions().apply {
