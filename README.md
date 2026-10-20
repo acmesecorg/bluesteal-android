@@ -34,6 +34,27 @@ user (the hosted token is a `token.ready` event):
 adb shell cat /sdcard/Android/data/org.crainiate.bluesteal/files/Logs/relay-*.jsonl
 ```
 
+## Rendezvous pairing (two-rooms demo)
+
+To pair with a device in another room without typing a token across, the peer
+pulls the host's current `CODE-ROUTING` token from a small Cloudflare Worker
+("rendezvous"). Deploy your own Worker from the umbrella repo's
+`tools/rendezvous/`, then set these in `local.properties` (gitignored — see
+`local.properties.example`):
+
+```
+rendezvous.baseUrl=https://<your-worker>.workers.dev
+rendezvous.key=<bearer>
+rendezvous.room=<room>
+```
+
+Rebuild, and a **Room** button appears next to Host / Join. Tapping it polls
+`GET /r/<room>`, joins with the latest token, retries across the host's ~60s
+routing rotations, and self-heals (re-joins) on a drop. Received adverts are
+re-broadcast on air (Android is dual-role), logged as `relay.advert.recv` /
+`rebroadcast.publish`. A `connectedDevice` foreground service keeps the relay
+alive while backgrounded / screen-locked.
+
 ## More
 
 Protocol, architecture, OOB-token format, and the shared specs live in the
