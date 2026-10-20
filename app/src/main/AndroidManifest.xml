@@ -33,6 +33,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Ask to be exempted from Doze / battery optimization so the relay (and its
+         foreground service) survives a pocketed, screen-locked walk. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Camera: scanning FIDO:/ QR codes to share with a peer. -->
     <uses-permission android:name="android.permission.CAMERA" />

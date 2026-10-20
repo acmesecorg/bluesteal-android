@@ -1,9 +1,15 @@
 package org.crainiate.bluesteal.ui
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,6 +53,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val app = application as BluestealApp
 
+        requestBatteryExemptionIfNeeded()
         handleAutoDrive(app)
 
         setContent {
@@ -87,6 +94,33 @@ class MainActivity : ComponentActivity() {
 
     private fun hasAllPermissions(): Boolean = requiredPermissions.all {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * Ask the user to exempt the app from Doze / battery optimization, so the
+     * relay and its foreground service aren't throttled or killed while the
+     * device is pocketed and screen-locked during a walk. No-op if already
+     * exempted; falls back to the settings list on OEMs without the direct dialog.
+     */
+    @SuppressLint("BatteryLife")
+    private fun requestBatteryExemptionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName"),
+                )
+            )
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (_: Exception) {
+                // No battery-optimization UI on this device; nothing to do.
+            }
+        }
     }
 
     /**
